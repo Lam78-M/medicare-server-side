@@ -93,6 +93,26 @@ app.get('/api/appointments/patient', async (req, res) => {
     }
 });
 
+app.get('/api/appointments/doctor', async (req, res) => {
+    try {
+        const { email } = req.query; 
+        
+        if (!email) {
+            return res.status(400).json({ message: "Email is required" });
+        }
+
+        console.log("Searching appointments for doctor email:", email);
+
+        // 💡 এখানে তোমার ডিফাইন করা আসল ভেরিয়েবলের নাম 'appoinmentCollection' ব্যবহার করা হয়েছে
+        const appointments = await appoinmentCollection.find({ doctorEmail: email }).toArray();
+        
+        console.log("Found doctor appointments count:", appointments.length);
+        res.status(200).json(appointments);
+    } catch (error) {
+        console.error("Doctor Appointment Fetch Error:", error);
+        res.status(500).json({ message: "Server Error", error: error.message });
+    }
+});
 
 // appointment deleting ----------------
 
@@ -239,6 +259,8 @@ app.get("/api/v1/patient-appointments/:patientId", async (req, res) => {
         });
 
 
+
+
         //sigle doctor id 
         app.get('/api/doctors/:id', async (req, res) => {
             try {
@@ -264,12 +286,6 @@ app.get("/api/v1/patient-appointments/:patientId", async (req, res) => {
         });
 
       //appoinment s 
-
-
-      
-
-
-
 
         await client.db("admin").command({ ping: 1 });
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
