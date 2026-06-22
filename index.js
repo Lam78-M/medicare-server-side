@@ -114,6 +114,39 @@ app.get('/api/appointments/doctor', async (req, res) => {
     }
 });
 
+
+// 🟢 অ্যাপয়েন্টমেন্ট স্ট্যাটাস 'Approved' করার জন্য PATCH API
+app.patch('/api/appointments/approve/:id', async (req, res) => {
+    try {
+        const { ObjectId } = require('mongodb');
+        const id = req.params.id;
+
+        // আইডি ফরম্যাট ঠিক আছে কিনা চেক করা
+        if (!ObjectId.isValid(id)) {
+            return res.status(400).json({ success: false, message: "Invalid Appointment ID format" });
+        }
+
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+            $set: {
+                status: 'Approved' // সরাসরি ডাটাবেজে স্ট্যাটাস Approved সেট হবে
+            }
+        };
+
+        // 💡 তোমার ব্যাকএন্ডের আসল কালেকশন ভেরিয়েবল 'appoinmentCollection'
+        const result = await appoinmentCollection.updateOne(filter, updateDoc);
+
+        if (result.modifiedCount === 1 || result.matchedCount === 1) {
+            res.status(200).json({ success: true, message: "Appointment approved successfully! 🎉" });
+        } else {
+            res.status(400).json({ success: false, message: "No data changed or appointment not found." });
+        }
+    } catch (error) {
+        console.error("Approve API Error:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // appointment deleting ----------------
 
 app.delete('/api/appointments/:id', async (req, res) => {
@@ -182,45 +215,75 @@ app.patch('/api/appointments/:id', async (req, res) => {
 // doctor review filtering 
 
      // Backend Route: Current Patient-er kora appointments theke doctors list ana
-app.get("/api/v1/patient-appointments/:patientId", async (req, res) => {
+// 🛠️ ৯. আপডেট করা রুট: ডাইনামিক ফিল্ড চেকিং সহ ইউনিক ডক্টর লিস্ট আনা
+app.get("/api/v1/patient-appointments/:email", async (req, res) => {
   try {
-    const { patientId } = req.params;
+    const { email } = req.params;
 
-    // 🚀 Tomar database selection variable text name (dhoro appointmentCollection)
-    // Dynamic match tracking query using patientId fields
-    const appointments = await db.collection("appointments")
-      .find({ patientId: patientId })
-      .toArray();
+    if (!email) {
+      return res.status(400).json({ success: false, message: "Email parameter is required" });
+    }
 
-    // Jodi appointments blank thake
+    // 💡 $or ব্যবহার করা হয়েছে যাতে ডাটাবেজে userEmail, email বা patientEmail যা-ই থাকুক না কেন ডেটা চলে আসে
+    const appointments = await appoinmentCollection.find({
+      $or: [
+        { userEmail: email },
+        { email: email },
+        { patientEmail: email }
+      ]
+    }).toArray();
+
+    console.log(`🔍 Total appointments found for ${email}:`, appointments.length);
+
     if (!appointments || appointments.length === 0) {
       return res.status(200).json({ success: true, doctors: [] });
     }
 
-    // 🔥 UNIQUE DOCTORS FILTER: Ek-i doctor jodi multi times booked thake, duplication bad deya
+    // 🔥 UNIQUE DOCTORS FILTER: ডুপ্লিকেট বাদ দিয়ে ইউনিক ডক্টর ম্যাপ করা
     const uniqueDoctorsMap = {};
     appointments.forEach(appnt => {
-      if (appnt.doctorId) {
-        uniqueDoctorsMap[appnt.doctorId] = {
-          id: appnt.doctorId,
-          name: appnt.doctorName || "Unknown Doctor"
+      // ডাটাবেজে doctorId বা id বা _id যেকোনো নামে আইডি থাকতে পারে
+      const docId = appnt.doctorId || appnt.id || appnt._id;
+      const docName = appnt.doctorName || appnt.name;
+
+      if (docId) {
+        uniqueDoctorsMap[docId] = {
+          id: docId,
+          doctorId: docId, // ফ্রন্টএন্ড সেফটির জন্য দুটাই রাখা হলো
+          name: docName || "Unknown Doctor",
+          doctorName: docName || "Unknown Doctor",
+          specialization: appnt.specialization || ""
         };
       }
     });
 
     const uniqueDoctorsList = Object.values(uniqueDoctorsMap);
+    console.log("🎯 Formatted Unique Doctors List Sent to Frontend:", uniqueDoctorsList);
 
     res.status(200).json({
       success: true,
-      doctors: uniqueDoctorsList // Client-e array list chole jabe
+      doctors: uniqueDoctorsList
     });
 
   } catch (error) {
     console.error("Fetch Appointment Doctors Error:", error);
-    res.status(500).json({ success: false, message: "Server API crash!" });
+    res.status(500).json({ success: false, message: "Server API crash!", error: error.message });
   }
 });
-      
+
+
+
+      // showind doctors that there patient give them ratings
+
+app.get('/api/v1/reviews/doctor/:doctorId', async (req, res) => {
+            try {
+                const { doctorId } = req.params;
+                const reviews = await reviewsCollection.find({ doctorId: doctorId }).toArray();
+                res.status(200).json({ success: true, reviews });
+            } catch (error) {
+                res.status(500).json({ success: false, message: "Error fetching reviews" });
+            }
+        });
           
         // 🩺 Doctors API Route
         app.get('/api/doctors', async (req, res) => {
