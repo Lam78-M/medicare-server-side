@@ -27,18 +27,39 @@ async function run() {
         await client.connect();
 
         const database = client.db("medicare_user");
-        // 💡 ভেরিয়েবলের নাম এখানে doctorsCollection
+        // Medicare data collections
         const doctorsCollection = database.collection("doctors");
         const appoinmentCollection = database.collection("appointments")
+        const reviewsCollection = database.collection("reviews")
 
-             // appoinments post
+        //doctors review by patient 
+
+          app.post("/api/v1/reviews", async (req, res) => {
+  try {
+    const reviewData = {
+      ...req.body,
+      createdAt: new Date() // Dynamic current date-time system active rakhar jonno
+    };
+    const result = await reviewsCollection.insertOne(reviewData);
+    res.status(201).json({ 
+      success: true, 
+      message: "Review successfully saved in database! 🎉",
+      insertedId: result.insertedId 
+    });
+  } catch (error) {
+    console.error("Database Insert Error:", error);
+    res.status(500).json({ success: false, message: "Server database crash!" });
+  }
+});
+
+        // appoinments post
 
         app.post('/api/appointments', async (req, res) => {
     try {
         const appointmentCollection = database.collection("appointments");
         const bookingData = req.body;
         
-        // কালেকশনে ডেটা ইনসার্ট করা
+        // collection data insert
         const result = await appointmentCollection.insertOne(bookingData);
         res.status(201).json(result);
     } catch (error) {
@@ -46,7 +67,7 @@ async function run() {
     }
 });
 
-// ২. কালেকশন থেকে সব ডেটা নেওয়া (get all data)
+       // ২. get data from collection (get all data)
 app.get('/api/appointments', async (req, res) => {
     try {
         const appointmentCollection = database.collection("appointments");
@@ -70,6 +91,114 @@ app.get('/api/appointments/patient', async (req, res) => {
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
+});
+
+
+// appointment deleting ----------------
+
+app.delete('/api/appointments/:id', async (req, res) => {
+    try {
+        const { ObjectId } = require('mongodb'); // MongoDB ObjectId tracking conversion
+        const id = req.params.id;
+
+        if (!ObjectId.isValid(id)) {
+            return res.status(400).json({ success: false, message: "Invalid Appointment ID format" });
+        }
+
+        const appointmentCollection = database.collection("appointments");
+        const query = { _id: new ObjectId(id) };
+
+        const result = await appointmentCollection.deleteOne(query);
+
+        if (result.deletedCount === 1) {
+            res.status(200).json({ success: true, message: "Appointment canceled successfully! 🛑" });
+        } else {
+            res.status(404).json({ success: false, message: "No appointment found with this ID" });
+        }
+    } catch (error) {
+        console.error("Cancel API Error:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+
+// appointment rescheduleing ----
+
+app.patch('/api/appointments/:id', async (req, res) => {
+    try {
+        const { ObjectId } = require('mongodb');
+        const id = req.params.id;
+        const { appointmentDate, appointmentDay, appointmentTime } = req.body;
+
+        if (!ObjectId.isValid(id)) {
+            return res.status(400).json({ success: false, message: "Invalid Appointment ID format" });
+        }
+
+        const appointmentCollection = database.collection("appointments");
+        const filter = { _id: new ObjectId(id) };
+
+        // Database dynamically set processing matching data structure tracker
+        const updateDoc = {
+            $set: {
+                appointmentDate: appointmentDate,
+                appointmentDay: appointmentDay,
+                appointmentTime: appointmentTime
+            }
+        };
+
+        const result = await appointmentCollection.updateOne(filter, updateDoc);
+
+        if (result.modifiedCount === 1 || result.matchedCount === 1) {
+            res.status(200).json({ success: true, message: "Appointment rescheduled successfully! 🗓️✨" });
+        } else {
+            res.status(400).json({ success: false, message: "No data changed or invalid target metadata." });
+        }
+    } catch (error) {
+        console.error("Reschedule API Error:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// doctor review filtering 
+
+     // Backend Route: Current Patient-er kora appointments theke doctors list ana
+app.get("/api/v1/patient-appointments/:patientId", async (req, res) => {
+  try {
+    const { patientId } = req.params;
+
+    // 🚀 Tomar database selection variable text name (dhoro appointmentCollection)
+    // Dynamic match tracking query using patientId fields
+    const appointments = await db.collection("appointments")
+      .find({ patientId: patientId })
+      .toArray();
+
+    // Jodi appointments blank thake
+    if (!appointments || appointments.length === 0) {
+      return res.status(200).json({ success: true, doctors: [] });
+    }
+
+    // 🔥 UNIQUE DOCTORS FILTER: Ek-i doctor jodi multi times booked thake, duplication bad deya
+    const uniqueDoctorsMap = {};
+    appointments.forEach(appnt => {
+      if (appnt.doctorId) {
+        uniqueDoctorsMap[appnt.doctorId] = {
+          id: appnt.doctorId,
+          name: appnt.doctorName || "Unknown Doctor"
+        };
+      }
+    });
+
+    const uniqueDoctorsList = Object.values(uniqueDoctorsMap);
+
+    res.status(200).json({
+      success: true,
+      doctors: uniqueDoctorsList // Client-e array list chole jabe
+    });
+
+  } catch (error) {
+    console.error("Fetch Appointment Doctors Error:", error);
+    res.status(500).json({ success: false, message: "Server API crash!" });
+  }
 });
       
           
