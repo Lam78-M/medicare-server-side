@@ -32,7 +32,68 @@ async function run() {
         const doctorsCollection = database.collection("doctors");
         const appointmentCollection = database.collection("appointments");
         const reviewsCollection = database.collection("reviews");
-const usersCollection = database.collection("user");
+        const usersCollection = database.collection("user");
+        const prescriptionCollection = database.collection("prescriptions")
+
+// -------------------------------------------------------------
+        // 💊 PRESCRIPTION ROUTES (MongoDB Native Upsert Pipeline)
+        // -------------------------------------------------------------
+
+        // ১. প্রেসক্রিপশন তৈরি অথবা মডিফাই করার API (কার্ড ডুপ্লিকেট হবে না)
+       // ১. প্রেসক্রিপশন তৈরি অথবা মডিফাই করার API
+
+// 💊 PRESCRIPTION ROUTE (Upsert Pipeline for Save & Update)
+app.post('/api/prescriptions/save', async (req, res) => {
+    try {
+        const { appointmentId, patientName, symptoms, medicines, advice } = req.body;
+        
+        console.log("📥 Payload received at backend:", req.body);
+
+        if (!appointmentId) {
+            return res.status(400).json({ success: false, message: "Appointment ID is strictly required!" });
+        }
+
+        // মঙ্গোডিবি ফিল্টার: এই appointmentId দিয়ে খুঁজবে
+        const filter = { appointmentId: appointmentId }; 
+        
+        const updateDoc = {
+            $set: {
+                patientName: patientName,
+                symptoms: symptoms,
+                medicines: medicines,
+                advice: advice,
+                // প্রতিটি আপডেটের সময় কারেন্ট ডেট সিঙ্ক করবে
+                date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }),
+                updatedAt: new Date()
+            }
+        };
+
+        // upsert: true থাকার কারণে আইডি ম্যাচ করলে ওটার ওপরেই আপডেট হবে, ম্যাচ না করলে নতুন ডকুমেন্ট হবে।
+        const options = { upsert: true }; 
+        const result = await prescriptionCollection.updateOne(filter, updateDoc, options);
+
+        res.status(200).json({ 
+            success: true, 
+            message: "Prescription seamlessly synced with MongoDB Atlas! 🎉", 
+            result 
+        });
+    } catch (error) {
+        console.error("❌ Backend Upsert Error:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+        // ২. সব প্রেসক্রিপশন একসাথে দেখার জন্য API (History Page-এর জন্য)
+        app.get('/api/prescriptions/all', async (req, res) => {
+            try {
+                // .sort({ updatedAt: -1 }) দেওয়াতে একদম লেটেস্ট প্রেসক্রিপশনগুলো সবার উপরে দেখাবে
+                const history = await prescriptionCollection.find({}).sort({ updatedAt: -1 }).toArray();
+                res.status(200).json(history);
+            } catch (error) {
+                console.error("Fetch Prescription History Error:", error);
+                res.status(500).json({ success: false, error: error.message });
+            }
+        });
+
 
         // -------------------------------------------------------------
         // 👤 USER PROFILE ROUTES (Phone, Gender Dynamic Update Pipeline)
@@ -110,16 +171,33 @@ const usersCollection = database.collection("user");
             }
         });
 
-        // 2. Get Doctor Reviews by ID
-        app.get('/api/v1/reviews/doctor/:doctorId', async (req, res) => {
-            try {
-                const { doctorId } = req.params;
-                const reviews = await reviewsCollection.find({ doctorId: doctorId }).toArray();
-                res.status(200).json({ success: true, reviews });
-            } catch (error) {
-                res.status(500).json({ success: false, message: "Error fetching reviews" });
-            }
-        });
+
+      // 2. Get Doctor Reviews by ID (Updated with String & ObjectId Support)
+app.get('/api/v1/reviews/doctor/:doctorId', async (req, res) => {
+    try {
+        const { doctorId } = req.params;
+        console.log("Requested Doctor ID from Frontend:", doctorId);
+
+        let query = { doctorId: doctorId }; 
+        if (ObjectId.isValid(doctorId)) {
+            query = {
+                $or: [
+                    { doctorId: doctorId },                
+                    { doctorId: new ObjectId(doctorId) }   
+                ]
+            };
+        }
+
+        const reviews = await reviewsCollection.find(query).toArray();
+        console.log(`Found reviews count for this doctor:`, reviews.length); 
+
+        res.status(200).json({ success: true, reviews });
+    } catch (error) {
+        console.error("Backend Review Fetch Error:", error);
+        res.status(500).json({ success: false, message: "Error fetching reviews" });
+    }
+});
+
 
         // -------------------------------------------------------------
         // 📅 APPOINTMENTS ROUTES
