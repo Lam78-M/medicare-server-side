@@ -25,9 +25,7 @@ const client = new MongoClient(uri, {
 async function run() {
     try {
         await client.connect();
-
         const database = client.db("medicare_user");
-        
         // --- Core Collections ---
         const doctorsCollection = database.collection("doctors");
         const appointmentCollection = database.collection("appointments");
@@ -35,41 +33,33 @@ async function run() {
         const usersCollection = database.collection("user");
         const prescriptionCollection = database.collection("prescriptions")
 
-// -------------------------------------------------------------
-        // 💊 PRESCRIPTION ROUTES (MongoDB Native Upsert Pipeline)
-        // -------------------------------------------------------------
-
-        // ১. প্রেসক্রিপশন তৈরি অথবা মডিফাই করার API (কার্ড ডুপ্লিকেট হবে না)
-       // ১. প্রেসক্রিপশন তৈরি অথবা মডিফাই করার API
-
-// 💊 PRESCRIPTION ROUTE (Upsert Pipeline for Save & Update)
+       // -------------------------------------------------------------
+      //  Prescription route for save & update
 app.post('/api/prescriptions/save', async (req, res) => {
     try {
-        const { appointmentId, patientName, symptoms, medicines, advice } = req.body;
-        
-        console.log("📥 Payload received at backend:", req.body);
+        // 🎯 doctorEmail-কে এখানে রিসিভ করা হলো
+        const { appointmentId, patientName, doctorEmail, symptoms, medicines, advice } = req.body;
+        console.log("Payload received at backend:", req.body);
 
         if (!appointmentId) {
             return res.status(400).json({ success: false, message: "Appointment ID is strictly required!" });
         }
-
-        // মঙ্গোডিবি ফিল্টার: এই appointmentId দিয়ে খুঁজবে
+        
         const filter = { appointmentId: appointmentId }; 
         
         const updateDoc = {
             $set: {
                 patientName: patientName,
+                doctorEmail: doctorEmail ? doctorEmail.trim().toLowerCase() : "", // 🎯 ডাটাবেজে ডক্টর ট্র্যাক করার জন্য সেভ করা হলো
                 symptoms: symptoms,
                 medicines: medicines,
                 advice: advice,
-                // প্রতিটি আপডেটের সময় কারেন্ট ডেট সিঙ্ক করবে
                 date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }),
                 updatedAt: new Date()
             }
         };
-
-        // upsert: true থাকার কারণে আইডি ম্যাচ করলে ওটার ওপরেই আপডেট হবে, ম্যাচ না করলে নতুন ডকুমেন্ট হবে।
-        const options = { upsert: true }; 
+        
+        const options = { upsert: true }; // এটিই ম্যাচ করলে আপডেট করবে, না মিললে নতুন ক্রিয়েট করবে।
         const result = await prescriptionCollection.updateOne(filter, updateDoc, options);
 
         res.status(200).json({ 
@@ -82,31 +72,26 @@ app.post('/api/prescriptions/save', async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 });
-        // ২. সব প্রেসক্রিপশন একসাথে দেখার জন্য API (History Page-এর জন্য)
-        app.get('/api/prescriptions/all', async (req, res) => {
-            try {
-                // .sort({ updatedAt: -1 }) দেওয়াতে একদম লেটেস্ট প্রেসক্রিপশনগুলো সবার উপরে দেখাবে
-                const history = await prescriptionCollection.find({}).sort({ updatedAt: -1 }).toArray();
-                res.status(200).json(history);
-            } catch (error) {
-                console.error("Fetch Prescription History Error:", error);
-                res.status(500).json({ success: false, error: error.message });
-            }
-        });
 
-
-        // -------------------------------------------------------------
-        // 👤 USER PROFILE ROUTES (Phone, Gender Dynamic Update Pipeline)
-        // -------------------------------------------------------------
-        
-        // 1. Update/Upsert User Profile (Frontend context logic triggers this)
+// To see all prescription
+app.get('/api/prescriptions/all', async (req, res) => {
+    try {
+        const history = await prescriptionCollection.find({}).sort({ updatedAt: -1 }).toArray();
+        res.status(200).json(history);
+    } catch (error) {
+        console.error("Fetch Prescription History Error:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+  
+        // User profiel route (Phone, Gender Dynamic Update Pipeline)
+    
         app.put('/api/user/update-profile', async (req, res) => {
             try {
                 const { email, name, phone, gender } = req.body;
                 if (!email) {
                     return res.status(400).json({ success: false, message: "User email is strictly required!" });
                 }
-
                 const filter = { email: email };
                 const updateDoc = {
                     $set: {
@@ -116,8 +101,6 @@ app.post('/api/prescriptions/save', async (req, res) => {
                         updatedAt: new Date()
                     }
                 };
-                
-                // upsert: true mane holo data thakle update hobe, na thakle automatic collection e insert hobe bondhu!
                 const options = { upsert: true }; 
                 const result = await usersCollection.updateOne(filter, updateDoc, options);
 
@@ -132,13 +115,13 @@ app.post('/api/prescriptions/save', async (req, res) => {
             }
         });
 
-        // 2. Fetch User Profile Data by Email (Booking Page and Settings Page will call this)
+        // 2. Fetch User Profile Data by Email ------------------
+
         app.get('/api/user/:email', async (req, res) => {
             try {
                 const { email } = req.params;
                 const user = await usersCollection.findOne({ email: email });
-                
-                // Jodi profile thake data pathabe, nahole empty payload response object safely trigger korbe
+            
                 if (!user) {
                     return res.status(200).json(null);
                 }
@@ -148,11 +131,76 @@ app.post('/api/prescriptions/save', async (req, res) => {
                 res.status(500).json({ success: false, error: error.message });
             }
         });
-        // -------------------------------------------------------------
-        // ⭐ REVIEWS ROUTES
-        // -------------------------------------------------------------
+
+        // 🔍 ১. সব ইউজার নিয়ে আসার এপিআই (usersCollection নাম ঠিক রেখে)
+app.get('/api/admin/all-users', async (req, res) => {
+    try {
+        // তোমার কালেকশনের সঠিক নাম usersCollection ব্যবহার করা হলো
+        const result = await usersCollection.find({}).sort({ _id: -1 }).toArray();
         
+        // প্রতিটি ইউজারের role বা status না থাকলে ডিফল্ট ভ্যালু সেট করা
+        const updatedUsers = result.map(user => ({
+            ...user,
+            role: user.role || "patient",       
+            status: user.status || "active"     
+        }));
+        
+        res.status(200).json(updatedUsers); // ফ্রন্টএন্ড যাতে খাঁটি JSON পায়
+    } catch (error) {
+        console.error("Fetch All Users Error:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 🔄 ২. ইউজারের স্ট্যাটাস আপডেট করার এপিআই
+app.put('/api/admin/update-user-status', async (req, res) => {
+    try {
+        const { id, status } = req.body; 
+        if (!id || !status) {
+            return res.status(400).json({ success: false, message: "ID and Status are required!" });
+        }
+
+        // এখানেও usersCollection ব্যবহার করা হয়েছে
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = { $set: { status: status } };
+
+        const result = await usersCollection.updateOne(filter, updateDoc);
+        if (result.modifiedCount > 0) {
+            res.status(200).json({ success: true, message: `User status updated to ${status}! 🔄` });
+        } else {
+            res.status(404).json({ success: false, message: "User not found or status already same." });
+        }
+    } catch (error) {
+        console.error("Update User Status Error:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 🔴 ৩. ইউজার ডিলিট করার এপিআই
+app.delete('/api/admin/delete-user', async (req, res) => {
+    try {
+        const { id } = req.body;
+        if (!id) {
+            return res.status(400).json({ success: false, message: "User ID is required!" });
+        }
+
+        // এখানেও usersCollection
+        const filter = { _id: new ObjectId(id) };
+        const result = await usersCollection.deleteOne(filter);
+
+        if (result.deletedCount > 0) {
+            res.status(200).json({ success: true, message: "User permanently deleted! ❌" });
+        } else {
+            res.status(404).json({ success: false, message: "User not found." });
+        }
+    } catch (error) {
+        console.error("Delete User Error:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+     
         // 1. Post a Doctor Review
+
         app.post("/api/v1/reviews", async (req, res) => {
             try {
                 const reviewData = {
@@ -198,12 +246,8 @@ app.get('/api/v1/reviews/doctor/:doctorId', async (req, res) => {
     }
 });
 
-
-        // -------------------------------------------------------------
-        // 📅 APPOINTMENTS ROUTES
-        // -------------------------------------------------------------
-
         // 1. Post/Book Appointment
+
         app.post('/api/appointments', async (req, res) => {
             try {
                 const bookingData = req.body;
@@ -213,7 +257,6 @@ app.get('/api/v1/reviews/doctor/:doctorId', async (req, res) => {
                 res.status(500).json({ error: error.message });
             }
         });
-
         // 2. Get All Appointments
         app.get('/api/appointments', async (req, res) => {
             try {
@@ -231,8 +274,6 @@ app.get('/api/v1/reviews/doctor/:doctorId', async (req, res) => {
                 if (!email) {
                     return res.status(400).json({ error: "Patient email is required as query parameter" });
                 }
-                
-                // Safety Layer: Checks fields interchangeably 
                 const query = {
                     $or: [
                         { userEmail: email },
@@ -249,6 +290,7 @@ app.get('/api/v1/reviews/doctor/:doctorId', async (req, res) => {
         });
 
         // 4. Get Appointments for Doctor Dashboard
+
         app.get('/api/appointments/doctor', async (req, res) => {
             try {
                 const { email } = req.query; 
@@ -265,6 +307,7 @@ app.get('/api/v1/reviews/doctor/:doctorId', async (req, res) => {
         });
 
         // 5. Approve Appointment Status
+
         app.patch('/api/appointments/approve/:id', async (req, res) => {
             try {
                 const id = req.params.id;
@@ -287,7 +330,8 @@ app.get('/api/v1/reviews/doctor/:doctorId', async (req, res) => {
             }
         });
 
-        // 6. Reschedule Appointment (Frontend HeroUI triggered)
+        // 6. Reschedule Appointment 
+        
         app.patch('/api/appointments/:id', async (req, res) => {
             try {
                 const id = req.params.id;
@@ -305,7 +349,6 @@ app.get('/api/v1/reviews/doctor/:doctorId', async (req, res) => {
                         appointmentTime: appointmentTime
                     }
                 };
-
                 const result = await appointmentCollection.updateOne(filter, updateDoc);
 
                 if (result.modifiedCount === 1 || result.matchedCount === 1) {
@@ -319,6 +362,7 @@ app.get('/api/v1/reviews/doctor/:doctorId', async (req, res) => {
         });
 
         // 7. Delete / Cancel Appointment
+
         app.delete('/api/appointments/:id', async (req, res) => {
             try {
                 const id = req.params.id;
@@ -340,6 +384,7 @@ app.get('/api/v1/reviews/doctor/:doctorId', async (req, res) => {
         });
 
         // 8. Fetch Unique Doctor List for Review Filters
+
         app.get("/api/v1/patient-appointments/:email", async (req, res) => {
             try {
                 const { email } = req.params;
@@ -384,62 +429,147 @@ app.get('/api/v1/reviews/doctor/:doctorId', async (req, res) => {
             }
         });
 
-        // -------------------------------------------------------------
-        // 👨‍⚕️ DOCTORS ROUTE
-        // -------------------------------------------------------------
+// 🎯 ফাইলের একদম শুরুতে বা মেইন ইমপোর্টের সাথে এটি একবার ডিক্লেয়ার করে নাও
+const { ObjectId } = require('mongodb');
+
+// ==========================================
+// ১. ইউজার বা পেশেন্টদের জন্য ডক্টর লিস্ট (ফিল্টার ও ভেরিফাইড স্ট্যাটাস সহ)
+// ==========================================
+app.get('/api/doctors', async (req, res) => {
+    try {
+        const search = req.query.search;
+        const specialization = req.query.specialization;
+        const sort = req.query.sort;
         
-        // 1. Get All Doctors with Filters & Sorting
-        app.get('/api/doctors', async (req, res) => {
-            try {
-                const search = req.query.search;
-                const specialization = req.query.specialization;
-                const sort = req.query.sort;
+        // 🎯 এখানে ফিল্টার করা হলো যেন পেশেন্টরা শুধু "Verified" ডাক্তারদের দেখে
+        let query = { 
+            verificationStatus: { $regex: /^verified$/i } 
+        };
 
-                let query = {};
+        if (search && search.trim() !== "") {
+            query.doctorName = { $regex: search, $options: 'i' };
+        }
 
-                if (search && search.trim() !== "") {
-                    query.doctorName = { $regex: search, $options: 'i' };
-                }
+        if (specialization && specialization.trim() !== "") {
+            query.specialization = specialization;
+        }
 
-                if (specialization && specialization.trim() !== "") {
-                    query.specialization = specialization;
-                }
+        let sortOption = {};
+        if (sort === 'lowToHigh') {
+            sortOption.consultationFee = 1;  
+        } else if (sort === 'highToLow') {
+            sortOption.consultationFee = -1; 
+        } else {
+            sortOption._id = -1;       
+        }
 
-                let sortOption = {};
-                if (sort === 'lowToHigh') {
-                    sortOption.consultationFee = 1;  
-                } else if (sort === 'highToLow') {
-                    sortOption.consultationFee = -1; 
-                } else {
-                    sortOption._id = -1;       
-                }
+        const result = await doctorsCollection.find(query).sort(sortOption).toArray();
+        res.send(result);
+    } catch (error) {
+        res.status(500).send({ message: "Server Error", error: error.message });
+    }
+});
 
-                const result = await doctorsCollection.find(query).sort(sortOption).toArray();
-                res.send(result);
-            } catch (error) {
-                res.status(500).send({ message: "Server Error", error: error.message });
-            }
-        });
+// ==========================================
+// ২. অ্যাডমিন প্যানেল: পেন্ডিং ও ভেরিফাইড সব ডাক্তার দেখার রাউট
+// ==========================================
+app.get('/api/admin/pending-doctors', async (req, res) => {
+    try {
+        const query = { 
+            verificationStatus: { $in: ["Pending", "pending", "Verified", "verified"] } 
+        };
+        const result = await doctorsCollection.find(query).sort({ _id: -1 }).toArray();
+        res.send(result);
+    } catch (error) {
+        res.status(500).send({ message: "Server Error", error: error.message });
+    }
+});
 
-            const { ObjectId } = require('mongodb'); // ফাইলের একদম উপরে এই লাইনটি না থাকলে যোগ করে নিবে
+// ==========================================
+// ৩. অ্যাডমিন অ্যাকশন: Approve Doctor (স্ট্যাটাস হবে "Verified")
+// ==========================================
+app.put('/api/admin/approve-doctor', async (req, res) => { // 🎯 ইউআরএল ফিক্স করা হয়েছে
+    try {
+        const { id } = req.body;
+        if (!id) return res.status(400).send({ message: "Doctor ID is required!" });
 
-// 🚀 ডক্টরের স্লট ও দিন আপডেট করার PATCH রাউট
-app.patch('/api/doctors/update-slots/:id', async (req, res) => {
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = { $set: { verificationStatus: "Verified" } };
+
+        const result = await doctorsCollection.updateOne(filter, updateDoc);
+        if (result.modifiedCount > 0) {
+            res.send({ success: true, message: "Doctor successfully approved! 🎉" });
+        } else {
+            res.status(404).send({ success: false, message: "Doctor not found or already verified." });
+        }
+    } catch (error) {
+        res.status(500).send({ message: "Server Error", error: error.message });
+    }
+});
+
+// ==========================================
+// ৪. অ্যাডমিন অ্যাকশন: Cancel Verify (স্ট্যাটাস আবার হবে "Pending")
+// ==========================================
+app.put('/api/admin/cancel-verify', async (req, res) => {
+    try {
+        const { id } = req.body;
+        if (!id) return res.status(400).send({ message: "Doctor ID is required!" });
+
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = { $set: { verificationStatus: "Pending" } };
+
+        const result = await doctorsCollection.updateOne(filter, updateDoc);
+        if (result.modifiedCount > 0) {
+            res.send({ success: true, message: "Verification cancelled successfully! ↩️" });
+        } else {
+            res.status(404).send({ success: false, message: "Doctor not found or status already Pending." });
+        }
+    } catch (error) {
+        res.status(500).send({ message: "Server Error", error: error.message });
+    }
+});
+
+// ==========================================
+// ৫. অ্যাডমিন অ্যাকশন: Reject License (ডাটাবেজ থেকে ডিলিট)
+// ==========================================
+app.delete('/api/admin/reject-doctor', async (req, res) => {
+    try {
+        const { id } = req.body;
+        if (!id) return res.status(400).send({ message: "Doctor ID is required!" });
+
+        const filter = { _id: new ObjectId(id) };
+        const result = await doctorsCollection.deleteOne(filter);
+
+        if (result.deletedCount > 0) {
+            res.send({ success: true, message: "Doctor license rejected & removed! ❌" });
+        } else {
+            res.status(404).send({ success: false, message: "Doctor profile not found." });
+        }
+    } catch (error) {
+        res.status(500).send({ message: "Server Error", error: error.message });
+    }
+});
+
+
+
+
+ 
+            //doctors slot update
+
+    app.patch('/api/doctors/update-slots/:id', async (req, res) => {
     try {
         const doctorId = req.params.id;
         const { availableDays, availableSlots } = req.body;
 
-        // ভ্যালিডেশন: আইডি ঠিক আছে কি না চেক করা
         if (!ObjectId.isValid(doctorId)) {
             return res.status(400).json({ message: "Invalid Doctor ID format! ❌" });
         }
 
-        // ডাটাবেজে নির্দিষ্ট ডক্টরের প্রোফাইল আপডেট করা
         const filter = { _id: new ObjectId(doctorId) };
         const updateDoc = {
             $set: {
-                availableDays: availableDays,   // ফ্রন্টএন্ড থেকে আসা নতুন ডেস অ্যারে
-                availableSlots: availableSlots  // ফ্রন্টএন্ড থেকে আসা [{time, isBooked}] অ্যারে
+                availableDays: availableDays,  
+                availableSlots: availableSlots  
             }
         };
 
@@ -461,18 +591,15 @@ app.patch('/api/doctors/update-slots/:id', async (req, res) => {
     }
 });
 
-// 🚀 ডক্টরের প্রোফাইল বায়ো আপডেট করার PATCH রাউট (Frontend Editor এর জন্য)
+                   //  doctors bio update
 app.patch('/api/doctors/update-profile/:id', async (req, res) => {
     try {
         const doctorId = req.params.id;
         const { qualifications, specialization, experience, hospitalName, profileImage } = req.body;
 
-        // ১. ভ্যালিডেশন: আইডি ঠিক আছে কি না চেক করা
         if (!ObjectId.isValid(doctorId)) {
             return res.status(400).json({ success: false, message: "Invalid Doctor ID format! ❌" });
         }
-
-        // ২. ফিল্টার এবং আপডেট অবজেক্ট তৈরি
         const filter = { _id: new ObjectId(doctorId) };
         const updateDoc = {
             $set: {
@@ -481,11 +608,10 @@ app.patch('/api/doctors/update-profile/:id', async (req, res) => {
                 experience: experience,
                 hospitalName: hospitalName,
                 profileImage: profileImage,
-                updatedAt: new Date() // কখন আপডেট হলো ট্র্যাকিংয়ের জন্য
+                updatedAt: new Date() 
             }
         };
 
-        // ৩. ডাটাবেজে আপডেট অপারেশন এক্সিকিউট করা
         const result = await doctorsCollection.updateOne(filter, updateDoc);
 
         if (result.matchedCount === 0) {
@@ -503,8 +629,8 @@ app.patch('/api/doctors/update-profile/:id', async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error", error: error.message });
     }
 });
-
         // 2. Get Single Doctor by ID
+
         app.get('/api/doctors/:id', async (req, res) => {
             try {
                 const id = req.params.id;
@@ -525,7 +651,7 @@ app.patch('/api/doctors/update-profile/:id', async (req, res) => {
             }
         });
 
-        // --- Database Health Check ---
+   
         await client.db("admin").command({ ping: 1 });
         console.log("Pinged your deployment. You successfully connected to MongoDB! 🎯");
     } finally {
