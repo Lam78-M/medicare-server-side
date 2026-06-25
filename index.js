@@ -246,6 +246,33 @@ app.get('/api/v1/reviews/doctor/:doctorId', async (req, res) => {
     }
 });
 
+
+// 3. Get Patient Reviews by ID (Direct Filter)
+app.get('/api/v1/reviews/patient/:patientId', async (req, res) => {
+    try {
+        const { patientId } = req.params;
+        console.log("Requested Patient ID from Frontend:", patientId);
+
+        let query = { patientId: patientId }; 
+        if (ObjectId.isValid(patientId)) {
+            query = {
+                $or: [
+                    { patientId: patientId },                
+                    { patientId: new ObjectId(patientId) }   
+                ]
+            };
+        }
+
+        const reviews = await reviewsCollection.find(query).toArray();
+        console.log(`Found reviews count given by this patient:`, reviews.length); 
+
+        res.status(200).json({ success: true, reviews });
+    } catch (error) {
+        console.error("Backend Patient Review Fetch Error:", error);
+        res.status(500).json({ success: false, message: "Error fetching patient reviews" });
+    }
+});
+
         // 1. Post/Book Appointment
 
         app.post('/api/appointments', async (req, res) => {
