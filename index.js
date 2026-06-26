@@ -201,6 +201,21 @@ app.delete('/api/admin/delete-user', async (req, res) => {
      
         // 1. Post a Doctor Review
 
+// 🚀 4. Get ALL Reviews From Database Pipeline (Direct Stream)
+app.get('/api/v1/reviews', async (req, res) => {
+    try {
+        const reviews = await reviewsCollection.find({}).toArray();
+        console.log(`Total database review count logs found:`, reviews.length); 
+        res.status(200).json({ success: true, reviews });
+    } catch (error) {
+        console.error("Backend Global Review Fetch Error:", error);
+        res.status(500).json({ success: false, message: "Error fetching global reviews cluster" });
+    }
+});
+
+
+
+
         app.post("/api/v1/reviews", async (req, res) => {
             try {
                 const reviewData = {
@@ -272,8 +287,40 @@ app.get('/api/v1/reviews/patient/:patientId', async (req, res) => {
         res.status(500).json({ success: false, message: "Error fetching patient reviews" });
     }
 });
+git 
+// 🟢 ডক্টরের ইমেইল দিয়ে তার আইডি খুঁজে বের করার API
+app.get('/api/v1/doctors/profile', async (req, res) => {
+    try {
+        const { email } = req.query;
+        if (!email) {
+            return res.status(400).json({ success: false, message: "Email query is required" });
+        }
+
+        // তোমার ডক্টর কালেকশনের নাম অনুযায়ী পরিবর্তন করে নিও (e.g., doctorsCollection)
+        const doctor = await database.collection("doctors").findOne({ email: email.trim().toLowerCase() });
+        
+        if (!doctor) {
+            return res.status(404).json({ success: false, message: "Doctor not found" });
+        }
+
+        // ডক্টরের আইডি এবং অন্যান্য প্রয়োজনীয় ইনফো পাঠিয়ে দিচ্ছি
+        res.status(200).json({ success: true, doctorId: doctor._id.toString(), doctorName: doctor.name });
+    } catch (error) {
+        console.error("Error fetching doctor profile:", error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+});
 
         // 1. Post/Book Appointment
+         // ব্যাকএন্ড কোড (Express API)
+app.get("/api/appointments/patient", async (req, res) => {
+    const email = req.query.email;
+    // ডাটাবেজের ফিল্ডের নাম যেহেতু userEmail, তাই কুয়েরিটা এমন হওয়া উচিত:
+    const query = { userEmail: email }; 
+    const result = await appointmentCollection.find(query).toArray();
+    res.send(result);
+});                                                    
+
 
         app.post('/api/appointments', async (req, res) => {
             try {
