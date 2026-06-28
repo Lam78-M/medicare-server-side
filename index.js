@@ -1,6 +1,7 @@
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const express = require('express');
 const cors = require('cors');
+const { createRemoteJWKSet, jwtVerify } = require('jose-cjs');
 require('dotenv').config();
 
 const app = express();
@@ -22,23 +23,49 @@ const client = new MongoClient(uri, {
     }
 });
 
+
+const JWKS = createRemoteJWKSet(
+    new URL("http://localhost:3000/api/auth/jwks")
+)
+
+const  verifyToken = async (req, res, next)=>{
+    const  authHeader = req?.headers.authorization;
+
+     if(!authHeader){
+        return res.status(401).json({message: "Unauthorized"})
+     }
+    const token = authHeader.split(" ")[1];
+    if(!token){
+        return res.status(401).json({message: "Unauthorized"})
+    }
+    
+     try{
+           const {payload} = await jwtVerify(token, JWKS)
+   console.log(payload)
+     next()
+
+     }catch(error){
+    return res.status(403).json({
+        message:"Forbidden"
+    })
+     } 
+};
+
 async function run() {
     try {
         await client.connect();
         const database = client.db("medicare_user");
-        // --- Core Collections ---
         const doctorsCollection = database.collection("doctors");
         const appointmentCollection = database.collection("appointments");
         const reviewsCollection = database.collection("reviews");
         const usersCollection = database.collection("user");
-        const prescriptionCollection = database.collection("prescriptions")
+      const prescriptionCollection = database.collection("prescriptions");
 
-       // -------------------------------------------------------------
-      //  Prescription route for save & update
-app.post('/api/prescriptions/save', async (req, res) => {
+// -------------------------------------------------------------
+app.post('/api/prescriptions/save',verifyToken,  async (req, res) => {
     try {
-        // 🎯 doctorEmail-কে এখানে রিসিভ করা হলো
-        const { appointmentId, patientName, doctorEmail, symptoms, medicines, advice } = req.body;
+  
+        const { appointmentId, patientName, patientEmail, patientId, doctorEmail, symptoms, medicines, advice } = req.body;
         console.log("Payload received at backend:", req.body);
 
         if (!appointmentId) {
@@ -50,16 +77,17 @@ app.post('/api/prescriptions/save', async (req, res) => {
         const updateDoc = {
             $set: {
                 patientName: patientName,
-                doctorEmail: doctorEmail ? doctorEmail.trim().toLowerCase() : "", // 🎯 ডাটাবেজে ডক্টর ট্র্যাক করার জন্য সেভ করা হলো
+                patientEmail: patientEmail ? patientEmail.trim().toLowerCase() : "", 
+                patientId: patientId || "", 
+                doctorEmail: doctorEmail ? doctorEmail.trim().toLowerCase() : "", 
                 symptoms: symptoms,
                 medicines: medicines,
                 advice: advice,
                 date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }),
                 updatedAt: new Date()
             }
-        };
-        
-        const options = { upsert: true }; // এটিই ম্যাচ করলে আপডেট করবে, না মিললে নতুন ক্রিয়েট করবে।
+        }; 
+        const options = { upsert: true };
         const result = await prescriptionCollection.updateOne(filter, updateDoc, options);
 
         res.status(200).json({ 
@@ -74,7 +102,7 @@ app.post('/api/prescriptions/save', async (req, res) => {
 });
 
 // To see all prescription
-app.get('/api/prescriptions/all', async (req, res) => {
+app.get('/api/prescriptions/all', verifyToken, async (req, res) => {
     try {
         const history = await prescriptionCollection.find({}).sort({ updatedAt: -1 }).toArray();
         res.status(200).json(history);
@@ -86,7 +114,7 @@ app.get('/api/prescriptions/all', async (req, res) => {
   
         // User profiel route (Phone, Gender Dynamic Update Pipeline)
     
-        app.put('/api/user/update-profile', async (req, res) => {
+        app.put('/api/user/update-profile', verifyToken, async (req, res) => {
             try {
                 const { email, name, phone, gender } = req.body;
                 if (!email) {
@@ -117,7 +145,7 @@ app.get('/api/prescriptions/all', async (req, res) => {
 
         // 2. Fetch User Profile Data by Email ------------------
 
-        app.get('/api/user/:email', async (req, res) => {
+        app.get('/api/user/:email', verifyToken, async (req, res) => {
             try {
                 const { email } = req.params;
                 const user = await usersCollection.findOne({ email: email });
@@ -133,7 +161,7 @@ app.get('/api/prescriptions/all', async (req, res) => {
         });
 
         // 🔍 ১. সব ইউজার নিয়ে আসার এপিআই (usersCollection নাম ঠিক রেখে)
-app.get('/api/admin/all-users', async (req, res) => {
+app.get('/api/admin/all-user', verifyToken, async (req, res) => {
     try {
         // তোমার কালেকশনের সঠিক নাম usersCollection ব্যবহার করা হলো
         const result = await usersCollection.find({}).sort({ _id: -1 }).toArray();
@@ -153,7 +181,7 @@ app.get('/api/admin/all-users', async (req, res) => {
 });
 
 // 🔄 ২. ইউজারের স্ট্যাটাস আপডেট করার এপিআই
-app.put('/api/admin/update-user-status', async (req, res) => {
+app.put('/api/admin/update-user-status', verifyToken, async (req, res) => {
     try {
         const { id, status } = req.body; 
         if (!id || !status) {
@@ -177,7 +205,7 @@ app.put('/api/admin/update-user-status', async (req, res) => {
 });
 
 // 🔴 ৩. ইউজার ডিলিট করার এপিআই
-app.delete('/api/admin/delete-user', async (req, res) => {
+app.delete('/api/admin/delete-user', verifyToken, async (req, res) => {
     try {
         const { id } = req.body;
         if (!id) {
@@ -202,7 +230,7 @@ app.delete('/api/admin/delete-user', async (req, res) => {
         // 1. Post a Doctor Review
 
 // 🚀 4. Get ALL Reviews From Database Pipeline (Direct Stream)
-app.get('/api/v1/reviews', async (req, res) => {
+app.get('/api/v1/reviews', verifyToken, async (req, res) => {
     try {
         const reviews = await reviewsCollection.find({}).toArray();
         console.log(`Total database review count logs found:`, reviews.length); 
@@ -214,9 +242,7 @@ app.get('/api/v1/reviews', async (req, res) => {
 });
 
 
-
-
-        app.post("/api/v1/reviews", async (req, res) => {
+        app.post("/api/v1/reviews", verifyToken, async (req, res) => {
             try {
                 const reviewData = {
                     ...req.body,
@@ -236,7 +262,7 @@ app.get('/api/v1/reviews', async (req, res) => {
 
 
       // 2. Get Doctor Reviews by ID (Updated with String & ObjectId Support)
-app.get('/api/v1/reviews/doctor/:doctorId', async (req, res) => {
+app.get('/api/v1/reviews/doctor/:doctorId', verifyToken, async (req, res) => {
     try {
         const { doctorId } = req.params;
         console.log("Requested Doctor ID from Frontend:", doctorId);
@@ -261,9 +287,40 @@ app.get('/api/v1/reviews/doctor/:doctorId', async (req, res) => {
     }
 });
 
+// 📌 ডক্টরের প্রোফাইল বায়ো আপডেট করার পারফেক্ট app.patch এপিআই
+app.patch('/api/doctors/update-profile/:id', verifyToken, async (req, res) => {
+    try {
+        const doctorId = req.params.id;
+        const { qualifications, specialization, experience, hospitalName, profileImage } = req.body;
+        const { ObjectId } = require('mongodb'); 
+
+        // 🎯 সমাধান: কালেকশনের নাম "doctors" করে দেওয়া হলো, যেখানে মেইন আইডি ডক্টরের নিজের আইডি
+        const result = await database.collection("doctors").updateOne(
+            { _id: new ObjectId(doctorId) }, 
+            {
+                $set: {
+                    qualifications: qualifications,
+                    specialization: specialization,
+                    experience: Number(experience), 
+                    hospitalName: hospitalName,
+                    profileImage: profileImage
+                }
+            }
+        );
+
+        if (result.matchedCount === 1) {
+            res.status(200).json({ success: true, message: "Doctor profile updated successfully! 🏛️" });
+        } else {
+            res.status(404).json({ success: false, message: "No doctor found with this ID!" });
+        }
+    } catch (error) {
+        console.error("Database patching error:", error);
+        res.status(500).json({ success: false, message: "Internal Server Error" });
+    }
+});
 
 // 3. Get Patient Reviews by ID (Direct Filter)
-app.get('/api/v1/reviews/patient/:patientId', async (req, res) => {
+app.get('/api/v1/reviews/patient/:patientId', verifyToken, async (req, res) => {
     try {
         const { patientId } = req.params;
         console.log("Requested Patient ID from Frontend:", patientId);
@@ -287,9 +344,9 @@ app.get('/api/v1/reviews/patient/:patientId', async (req, res) => {
         res.status(500).json({ success: false, message: "Error fetching patient reviews" });
     }
 });
-git 
+
 // 🟢 ডক্টরের ইমেইল দিয়ে তার আইডি খুঁজে বের করার API
-app.get('/api/v1/doctors/profile', async (req, res) => {
+app.get('/api/v1/doctors/profile', verifyToken, async (req, res) => {
     try {
         const { email } = req.query;
         if (!email) {
@@ -311,9 +368,29 @@ app.get('/api/v1/doctors/profile', async (req, res) => {
     }
 });
 
-        // 1. Post/Book Appointment
-         // ব্যাকএন্ড কোড (Express API)
-app.get("/api/appointments/patient", async (req, res) => {
+ 
+app.delete('/api/appointments/delete/:id', verifyToken, async (req, res) => {
+    try {
+        const appointmentId = req.params.id;
+        const { ObjectId } = require('mongodb'); // অবজেক্ট আইডি ইম্পোর্ট
+
+        const result = await database.collection("appointments").deleteOne({
+            _id: new ObjectId(appointmentId)
+        });
+
+        if (result.deletedCount === 1) {
+            res.status(200).json({ success: true, message: "Appointment deleted! 🗑️" });
+        } else {
+            res.status(404).json({ success: false, message: "Appointment not found!" });
+        }
+    } catch (error) {
+        console.error("Delete error:", error);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+
+app.get("/api/appointments/patient", verifyToken, async (req, res) => {
     const email = req.query.email;
     // ডাটাবেজের ফিল্ডের নাম যেহেতু userEmail, তাই কুয়েরিটা এমন হওয়া উচিত:
     const query = { userEmail: email }; 
@@ -322,7 +399,7 @@ app.get("/api/appointments/patient", async (req, res) => {
 });                                                    
 
 
-        app.post('/api/appointments', async (req, res) => {
+        app.post('/api/appointments', verifyToken, async (req, res) => {
             try {
                 const bookingData = req.body;
                 const result = await appointmentCollection.insertOne(bookingData);
@@ -332,7 +409,7 @@ app.get("/api/appointments/patient", async (req, res) => {
             }
         });
         // 2. Get All Appointments
-        app.get('/api/appointments', async (req, res) => {
+        app.get('/api/appointments',  verifyToken, async (req, res) => {
             try {
                 const appointments = await appointmentCollection.find({}).toArray();
                 res.status(200).json(appointments);
@@ -340,9 +417,10 @@ app.get("/api/appointments/patient", async (req, res) => {
                 res.status(500).json({ error: error.message });
             }
         });
+        
 
         // 3. Get Appointments for Particular Patient (Matches your Frontend HeroUI view)
-        app.get('/api/appointments/patient', async (req, res) => {
+        app.get('/api/appointments/patient', verifyToken, async (req, res) => {
             try {
                 const email = req.query.email;
                 if (!email) {
@@ -365,7 +443,7 @@ app.get("/api/appointments/patient", async (req, res) => {
 
         // 4. Get Appointments for Doctor Dashboard
 
-        app.get('/api/appointments/doctor', async (req, res) => {
+        app.get('/api/appointments/doctor', verifyToken, async (req, res) => {
             try {
                 const { email } = req.query; 
                 if (!email) {
@@ -382,7 +460,7 @@ app.get("/api/appointments/patient", async (req, res) => {
 
         // 5. Approve Appointment Status
 
-        app.patch('/api/appointments/approve/:id', async (req, res) => {
+        app.patch('/api/appointments/approve/:id', verifyToken, async (req, res) => {
             try {
                 const id = req.params.id;
                 if (!ObjectId.isValid(id)) {
@@ -406,7 +484,7 @@ app.get("/api/appointments/patient", async (req, res) => {
 
         // 6. Reschedule Appointment 
         
-        app.patch('/api/appointments/:id', async (req, res) => {
+        app.patch('/api/appointments/:id', verifyToken, async (req, res) => {
             try {
                 const id = req.params.id;
                 const { appointmentDate, appointmentDay, appointmentTime } = req.body;
@@ -437,7 +515,7 @@ app.get("/api/appointments/patient", async (req, res) => {
 
         // 7. Delete / Cancel Appointment
 
-        app.delete('/api/appointments/:id', async (req, res) => {
+        app.delete('/api/appointments/:id', verifyToken, async (req, res) => {
             try {
                 const id = req.params.id;
                 if (!ObjectId.isValid(id)) {
@@ -459,7 +537,7 @@ app.get("/api/appointments/patient", async (req, res) => {
 
         // 8. Fetch Unique Doctor List for Review Filters
 
-        app.get("/api/v1/patient-appointments/:email", async (req, res) => {
+        app.get("/api/v1/patient-appointments/:email", verifyToken, async (req, res) => {
             try {
                 const { email } = req.params;
                 if (!email) {
@@ -502,14 +580,10 @@ app.get("/api/appointments/patient", async (req, res) => {
                 res.status(500).json({ success: false, message: "Server API crash!", error: error.message });
             }
         });
-
-// 🎯 ফাইলের একদম শুরুতে বা মেইন ইমপোর্টের সাথে এটি একবার ডিক্লেয়ার করে নাও
 const { ObjectId } = require('mongodb');
 
-// ==========================================
-// ১. ইউজার বা পেশেন্টদের জন্য ডক্টর লিস্ট (ফিল্টার ও ভেরিফাইড স্ট্যাটাস সহ)
-// ==========================================
-app.get('/api/doctors', async (req, res) => {
+
+app.get('/api/doctors',verifyToken, async (req, res) => {
     try {
         const search = req.query.search;
         const specialization = req.query.specialization;
@@ -547,7 +621,7 @@ app.get('/api/doctors', async (req, res) => {
 // ==========================================
 // ২. অ্যাডমিন প্যানেল: পেন্ডিং ও ভেরিফাইড সব ডাক্তার দেখার রাউট
 // ==========================================
-app.get('/api/admin/pending-doctors', async (req, res) => {
+app.get('/api/admin/pending-doctors', verifyToken, async (req, res) => {
     try {
         const query = { 
             verificationStatus: { $in: ["Pending", "pending", "Verified", "verified"] } 
@@ -562,7 +636,7 @@ app.get('/api/admin/pending-doctors', async (req, res) => {
 // ==========================================
 // ৩. অ্যাডমিন অ্যাকশন: Approve Doctor (স্ট্যাটাস হবে "Verified")
 // ==========================================
-app.put('/api/admin/approve-doctor', async (req, res) => { // 🎯 ইউআরএল ফিক্স করা হয়েছে
+app.put('/api/admin/approve-doctor', verifyToken, async (req, res) => { // 🎯 ইউআরএল ফিক্স করা হয়েছে
     try {
         const { id } = req.body;
         if (!id) return res.status(400).send({ message: "Doctor ID is required!" });
@@ -584,7 +658,7 @@ app.put('/api/admin/approve-doctor', async (req, res) => { // 🎯 ইউআর�
 // ==========================================
 // ৪. অ্যাডমিন অ্যাকশন: Cancel Verify (স্ট্যাটাস আবার হবে "Pending")
 // ==========================================
-app.put('/api/admin/cancel-verify', async (req, res) => {
+app.put('/api/admin/cancel-verify', verifyToken, async (req, res) => {
     try {
         const { id } = req.body;
         if (!id) return res.status(400).send({ message: "Doctor ID is required!" });
@@ -606,7 +680,7 @@ app.put('/api/admin/cancel-verify', async (req, res) => {
 // ==========================================
 // ৫. অ্যাডমিন অ্যাকশন: Reject License (ডাটাবেজ থেকে ডিলিট)
 // ==========================================
-app.delete('/api/admin/reject-doctor', async (req, res) => {
+app.delete('/api/admin/reject-doctor', verifyToken, async (req, res) => {
     try {
         const { id } = req.body;
         if (!id) return res.status(400).send({ message: "Doctor ID is required!" });
@@ -624,13 +698,9 @@ app.delete('/api/admin/reject-doctor', async (req, res) => {
     }
 });
 
-
-
-
- 
             //doctors slot update
 
-    app.patch('/api/doctors/update-slots/:id', async (req, res) => {
+    app.patch('/api/doctors/update-slots/:id', verifyToken, async (req, res) => {
     try {
         const doctorId = req.params.id;
         const { availableDays, availableSlots } = req.body;
@@ -666,22 +736,25 @@ app.delete('/api/admin/reject-doctor', async (req, res) => {
 });
 
                    //  doctors bio update
-app.patch('/api/doctors/update-profile/:id', async (req, res) => {
+
+// 🩺 DOCTOR BIO UPDATE (100% Tested Standard Router)
+app.patch('/api/doctors/update-profile/:id', verifyToken, async (req, res) => {
     try {
         const doctorId = req.params.id;
-        const { qualifications, specialization, experience, hospitalName, profileImage } = req.body;
+        const { qualifications, specialization, experience, hospitalName } = req.body;
 
-        if (!ObjectId.isValid(doctorId)) {
-            return res.status(400).json({ success: false, message: "Invalid Doctor ID format! ❌" });
+        // Validation target hex criteria check format
+        if (!doctorId || doctorId === "undefined" || !ObjectId.isValid(doctorId)) {
+            return res.status(400).json({ success: false, message: "Invalid Doctor ID format received by server! ❌" });
         }
+
         const filter = { _id: new ObjectId(doctorId) };
         const updateDoc = {
             $set: {
-                qualifications: qualifications,
-                specialization: specialization,
-                experience: experience,
-                hospitalName: hospitalName,
-                profileImage: profileImage,
+                qualifications: qualifications || "",
+                specialization: specialization || "",
+                experience: experience ? Number(experience) : 0,
+                hospitalName: hospitalName || "",
                 updatedAt: new Date() 
             }
         };
@@ -689,23 +762,23 @@ app.patch('/api/doctors/update-profile/:id', async (req, res) => {
         const result = await doctorsCollection.updateOne(filter, updateDoc);
 
         if (result.matchedCount === 0) {
-            return res.status(404).json({ success: false, message: "Doctor profile not found! 🔍" });
+            return res.status(404).json({ success: false, message: "Doctor record target not matching in DB! 🔍" });
         }
 
-        res.status(200).json({ 
+        return res.status(200).json({ 
             success: true, 
             message: "Medical profile schema synchronized successfully! 🏛️🩺", 
             result 
         });
 
     } catch (error) {
-        console.error("Error updating doctor profile:", error);
-        res.status(500).json({ success: false, message: "Server Error", error: error.message });
+        console.error("Backend exception mapping:", error);
+        return res.status(500).json({ success: false, message: "Server Error", error: error.message });
     }
 });
         // 2. Get Single Doctor by ID
 
-        app.get('/api/doctors/:id', async (req, res) => {
+        app.get('/api/doctors/:id', verifyToken, async (req, res) => {
             try {
                 const id = req.params.id;
                 if (!ObjectId.isValid(id)) {
