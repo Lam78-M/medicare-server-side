@@ -81,7 +81,7 @@ app.get("/reviews", async (req, res) => {
   res.send(reviews);
 });
 
-app.post('/api/prescriptions/save', verifyToken,  async (req, res) => {
+app.post('/api/prescriptions/save',   async (req, res) => {
     try {
       
         const { appointmentId, patientName, patientEmail, patientId, doctorEmail, symptoms, medicines, advice } = req.body;
